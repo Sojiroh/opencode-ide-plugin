@@ -3,8 +3,11 @@
 import solidPlugin from "./solid-plugin"
 import path from "path"
 import { $ } from "bun"
+import fs from "fs/promises"
+import nodefs from "fs"
 import { fileURLToPath } from "url"
 import { createRequire } from "module"
+import pkg from "../package.json"
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -13,11 +16,9 @@ const dir = path.resolve(__dirname, "..")
 
 process.chdir(dir)
 
-import pkg from "../package.json"
 import { Script } from "@opencode-ai/script"
-import fs from "fs/promises"
-import nodefs from "fs"
 
+// build webgui and generate embedded assets for server
 await $`bun run build:webgui`
 
 const webGuiDir = path.join(dir, "webgui-dist")
@@ -186,7 +187,6 @@ for (const item of targets) {
     compile: {
       autoloadBunfig: false,
       autoloadDotenv: false,
-      //@ts-ignore (bun types aren't up to date)
       autoloadTsconfig: true,
       autoloadPackageJson: true,
       target: name.replace(pkg.name, "bun") as any,
@@ -229,7 +229,7 @@ if (Script.release) {
       await $`zip -r ../../${key}.zip *`.cwd(`dist/${key}/bin`)
     }
   }
-  await $`gh release upload v${Script.version} ./dist/*.zip ./dist/*.tar.gz --clobber`
+  await $`gh release upload v${Script.version} ./dist/*.zip ./dist/*.tar.gz --clobber --repo ${process.env.GH_REPO}`
 }
 
 export { binaries }
