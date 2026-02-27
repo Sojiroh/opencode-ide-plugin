@@ -37,6 +37,11 @@ interface Message {
   timestamp: number
 }
 
+type BridgeSettings = {
+  theme?: "light" | "dark"
+  [key: string]: unknown
+}
+
 class IdeBridgeServer {
   private server: http.Server | null = null
   private port: number = 0
@@ -343,6 +348,21 @@ class IdeBridgeServer {
           break
         }
 
+        case "settings.get": {
+          this.replyWithPayload(session, id, this.readSettings())
+          break
+        }
+
+        case "settings.update": {
+          const existing = this.readSettings()
+          const patch = this.normalizeSettings(payload)
+          const merged = this.normalizeSettings({ ...existing, ...patch })
+          fs.mkdirSync(this.statePath(), { recursive: true })
+          fs.writeFileSync(this.settingsPath(), JSON.stringify(merged, null, 2))
+          this.replyWithPayload(session, id, merged)
+          break
+        }
+
         default:
           this.replyError(session, id, `Unknown type: ${type}`)
       }
@@ -357,6 +377,33 @@ class IdeBridgeServer {
 
   private statePath(): string {
     return path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state"), "opencode")
+  }
+
+  private settingsPath(): string {
+    return path.join(this.statePath(), "settings.json")
+  }
+
+  private readSettings(): BridgeSettings {
+    try {
+      const file = this.settingsPath()
+      if (!fs.existsSync(file)) return {}
+      const parsed = JSON.parse(fs.readFileSync(file, "utf-8"))
+      return this.normalizeSettings(parsed)
+    } catch {
+      return {}
+    }
+  }
+
+  private normalizeSettings(input: unknown): BridgeSettings {
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      return {}
+    }
+
+    const next = { ...(input as Record<string, unknown>) } as BridgeSettings
+    if (next.theme !== undefined && next.theme !== "light" && next.theme !== "dark") {
+      delete next.theme
+    }
+    return next
   }
 
   private replyWithPayload(session: Session, id: string | undefined, payload: any): void {

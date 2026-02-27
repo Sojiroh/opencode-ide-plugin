@@ -376,6 +376,22 @@ object IdeBridge {
                     replyWithPayload(session, id, existing)
                 }
 
+                "settings.get" -> {
+                    replyWithPayload(session, id, readSettings())
+                }
+
+                "settings.update" -> {
+                    val current = readSettings()
+                    val merged = JsonObject().apply {
+                        current.entrySet().forEach { (k, v) -> add(k, v) }
+                        payload?.entrySet()?.forEach { (k, v) -> add(k, v) }
+                    }
+                    val normalized = normalizeSettings(merged)
+                    statePath.mkdirs()
+                    File(statePath, "settings.json").writeText(gson.toJson(normalized))
+                    replyWithPayload(session, id, normalized)
+                }
+
                 else -> replyError(session, id, "Unknown type: $type")
             }
 
@@ -392,6 +408,31 @@ object IdeBridge {
             System.getenv("XDG_STATE_HOME") ?: "${System.getProperty("user.home")}/.local/state",
             "opencode"
         )
+
+    private fun readSettings(): JsonObject {
+        val file = File(statePath, "settings.json")
+        val data = try {
+            if (file.exists()) gson.fromJson(file.readText(), JsonObject::class.java) ?: JsonObject()
+            else JsonObject()
+        } catch (_: Throwable) { JsonObject() }
+        return normalizeSettings(data)
+    }
+
+    private fun normalizeSettings(raw: JsonObject): JsonObject {
+        val normalized = JsonObject()
+        raw.entrySet().forEach { (k, v) -> normalized.add(k, v) }
+
+        if (normalized.has("theme")) {
+            val theme = normalized.get("theme")
+            val valid = theme != null && theme.isJsonPrimitive && theme.asJsonPrimitive.isString &&
+                (theme.asString == "light" || theme.asString == "dark")
+            if (!valid) {
+                normalized.remove("theme")
+            }
+        }
+
+        return normalized
+    }
 
     private fun replyWithPayload(session: Session, id: String?, payload: Any) {
         if (id == null) return

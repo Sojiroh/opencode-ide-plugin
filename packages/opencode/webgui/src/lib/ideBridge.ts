@@ -8,6 +8,11 @@ type Message = {
   error?: string
 }
 
+export type IdeBridgeSettings = {
+  theme?: "light" | "dark"
+  [key: string]: unknown
+}
+
 type Handler = (message: Message) => void
 
 // Parse URL params once at module load
@@ -75,6 +80,12 @@ class IdeBridge {
       void this.getState().then((state) => {
         try {
           window.dispatchEvent(new CustomEvent("opencode:ui-bridge-state", { detail: { state } }))
+        } catch {}
+      })
+
+      void this.getSettings().then((settings) => {
+        try {
+          window.dispatchEvent(new CustomEvent("opencode:ui-bridge-settings", { detail: { settings } }))
         } catch {}
       })
     }
@@ -171,7 +182,11 @@ class IdeBridge {
   private async doSend(msg: Message, retryCount = 0) {
     if (!bridgeBase || !token) return
 
-    const quiet = msg.type === "uiGetState" || msg.type === "uiSetState"
+    const quiet =
+      msg.type === "uiGetState" ||
+      msg.type === "uiSetState" ||
+      msg.type === "settings.get" ||
+      msg.type === "settings.update"
 
     try {
       const response = await fetch(`${bridgeBase}/send?token=${encodeURIComponent(token)}`, {
@@ -250,6 +265,30 @@ class IdeBridge {
       return !!(res as any)?.ok
     } catch {
       return false
+    }
+  }
+
+  async getSettings<T extends IdeBridgeSettings = IdeBridgeSettings>(): Promise<T | null> {
+    try {
+      const res = await this.request<T>("settings.get")
+      const settings = (res as any)?.payload
+      if (!settings || typeof settings !== "object") return null
+      return settings as T
+    } catch {
+      return null
+    }
+  }
+
+  async updateSettings<T extends IdeBridgeSettings = IdeBridgeSettings>(
+    patch: Partial<T>,
+  ): Promise<T | null> {
+    try {
+      const res = await this.request<T>("settings.update", patch)
+      const settings = (res as any)?.payload
+      if (!settings || typeof settings !== "object") return null
+      return settings as T
+    } catch {
+      return null
     }
   }
 }

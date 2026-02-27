@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
+import { ideBridge, type IdeBridgeSettings } from "../lib/ideBridge"
 
 type Theme = "light" | "dark"
 
@@ -9,26 +10,56 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null)
 
+function systemTheme(): Theme {
+  if (typeof window === "undefined") return "light"
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+}
+
+function parseTheme(value: unknown): Theme | null {
+  if (value === "light" || value === "dark") return value
+  return null
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>("light")
+  const [theme, setTheme] = useState<Theme>(() => systemTheme())
 
   useEffect(() => {
-    // Apply theme to document root
-    console.log("[ThemeProvider] Applying theme:", theme)
     if (theme === "dark") {
       document.documentElement.classList.add("dark")
     } else {
       document.documentElement.classList.remove("dark")
     }
-    console.log("[ThemeProvider] document.documentElement.classList:", document.documentElement.classList.toString())
   }, [theme])
 
+  useEffect(() => {
+    if (!ideBridge.isInstalled()) return
+
+    const apply = (settings: IdeBridgeSettings | null | undefined) => {
+      const next = parseTheme(settings?.theme)
+      if (!next) return
+      setTheme(next)
+    }
+
+    const handler = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ settings?: IdeBridgeSettings | null }>).detail
+      apply(detail?.settings)
+    }
+
+    window.addEventListener("opencode:ui-bridge-settings", handler)
+    void ideBridge.getSettings().then((settings) => apply(settings))
+
+    return () => {
+      window.removeEventListener("opencode:ui-bridge-settings", handler)
+    }
+  }, [])
+
   const toggleTheme = () => {
-    console.log("[ThemeProvider] Toggle theme called, current:", theme)
     setTheme((prev) => {
-      const newTheme = prev === "light" ? "dark" : "light"
-      console.log("[ThemeProvider] New theme:", newTheme)
-      return newTheme
+      const next = prev === "light" ? "dark" : "light"
+      if (ideBridge.isInstalled()) {
+        void ideBridge.updateSettings({ theme: next })
+      }
+      return next
     })
   }
 
