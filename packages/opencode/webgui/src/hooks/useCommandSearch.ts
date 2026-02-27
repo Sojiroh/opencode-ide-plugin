@@ -16,7 +16,7 @@ export interface CommandResult {
 let commandsCache: CommandWithSource[] | null = null
 let commandsPromise: Promise<CommandWithSource[]> | null = null
 
-async function loadCommands() {
+export async function loadCommands() {
   if (commandsCache) {
     return commandsCache
   }

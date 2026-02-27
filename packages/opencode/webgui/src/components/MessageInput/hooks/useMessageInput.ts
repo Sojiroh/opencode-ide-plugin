@@ -3,6 +3,7 @@ import { $getRoot, $createParagraphNode, $createTextNode, type LexicalEditor } f
 import { sdk } from "../../../lib/api/sdkClient"
 import { useSession } from "../../../state/SessionContext"
 import { useToast } from "../../../state/ToastContext"
+import { loadCommands } from "../../../hooks/useCommandSearch"
 
 interface UseMessageInputOptions {
   sessionID: string | null
@@ -54,6 +55,28 @@ export function useMessageInput({
     try {
       const trimmedMessage = savedMessage.trim()
       const isCommand = trimmedMessage.startsWith("/")
+      const commandParts = isCommand ? trimmedMessage.slice(1).split(/\s+/) : []
+      const commandName = commandParts[0]
+      const commandArgs = commandParts.slice(1).join(" ")
+      const commandList = isCommand && commandName ? await loadCommands() : []
+      const shouldRunCommand =
+        commandList.length > 0 &&
+        commandList.some((command) => command.name.toLowerCase() === commandName.toLowerCase())
+      const isUnknownCommand = isCommand && !!commandName && commandList.length > 0 && !shouldRunCommand
+
+      if (isUnknownCommand) {
+        showToast(`Unknown command "/${commandName}". Sending as regular message.`, {
+          title: "Unknown command",
+          variant: "warning",
+          duration: 4000,
+        })
+      }
+
+      const parts = shouldRunCommand ? [] : extractMessageParts()
+
+      if (!shouldRunCommand && parts.length === 0) {
+        throw new Error("No message content")
+      }
 
       let actualSessionID = sessionID
       if (isVirtualSession) {
@@ -80,11 +103,7 @@ export function useMessageInput({
         editor.focus()
       }, 0)
 
-      if (isCommand) {
-        const commandParts = trimmedMessage.slice(1).split(/\s+/)
-        const commandName = commandParts[0]
-        const commandArgs = commandParts.slice(1).join(" ")
-
+      if (shouldRunCommand) {
         const requestBody: any = {
           command: commandName,
           // Server schema requires `arguments` even if empty
@@ -117,12 +136,6 @@ export function useMessageInput({
           throw new Error(errorMsg)
         }
       } else {
-        const parts = extractMessageParts()
-
-        if (parts.length === 0) {
-          throw new Error("No message content")
-        }
-
         const requestBody: any = {
           parts,
         }
