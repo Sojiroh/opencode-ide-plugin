@@ -5,6 +5,12 @@ All notable changes to the OpenCode VSCode extension will be documented in this 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec2.0.0.html).
 
+### [26.2.27] - 2026-02-27
+
+- Add theme persistence
+- Fix unknown command bug reported by qinze113
+- OpenCode was updated to 1.2.15
+
 ### [26.2.15] - 2026-02-15
 
 - Update OpenCode to v1.2.1
