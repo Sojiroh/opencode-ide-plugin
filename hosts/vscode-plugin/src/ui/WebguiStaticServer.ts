@@ -106,6 +106,28 @@ class WebguiStaticServer {
       return;
     }
 
+    // Redirect /app (without trailing characters) to /app/ so the client-side
+    // router doesn't misinterpret it as a base64-encoded directory path.
+    if (pathname === "/app") {
+      let target = "/app/";
+      if (url.search) target += url.search;
+      if (url.hash) target += url.hash;
+      res.writeHead(302, { Location: target });
+      res.end();
+      return;
+    }
+
+    // Redirect /app (without trailing characters) to /app/ so the client-side
+    // router doesn't misinterpret it as a base64-encoded directory path.
+    if (pathname === "/app") {
+      let target = "/app/";
+      if (url.search) target += url.search;
+      if (url.hash) target += url.hash;
+      res.writeHead(302, { Location: target });
+      res.end();
+      return;
+    }
+
     // Strip /app prefix to get the relative file path within webgui-dist
     let relative = pathname.slice("/app".length);
     if (!relative || relative === "/") {

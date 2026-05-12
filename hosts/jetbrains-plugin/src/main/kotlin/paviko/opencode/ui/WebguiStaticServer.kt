@@ -107,6 +107,17 @@ object WebguiStaticServer {
             return
         }
 
+        // Redirect /app (without trailing characters) to /app/ so the client-side
+        // router doesn't misinterpret it as a base64-encoded directory path.
+        if (pathname == "/app") {
+            val query = exchange.requestURI.rawQuery
+            val target = if (query != null) "/app/?$query" else "/app/"
+            exchange.responseHeaders.add("Location", target)
+            exchange.sendResponseHeaders(302, -1)
+            exchange.close()
+            return
+        }
+
         // Strip /app prefix to get relative file path within webgui-dist
         var relative = pathname.removePrefix("/app")
         if (relative.isEmpty() || relative == "/") relative = "/index.html"

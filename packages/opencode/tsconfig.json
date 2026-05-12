@@ -10,8 +10,9 @@
     "customConditions": ["browser"],
     "paths": {
       "@/*": ["./src/*"],
-      "@tui/*": ["./src/cli/cmd/tui/*"]
+      "@tui/*": ["./src/cli/cmd/tui/*"],
+      "@test/*": ["./test/*"]
     }
   },
-  "exclude": ["webgui/**/*"]
+  "exclude": ["webgui/**/*", "src/webgui/**/*"]
 }

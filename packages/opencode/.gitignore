@@ -1,7 +1,13 @@
 research
 dist
+dist-*
 gen
 app.log
 webgui-dist
 /src/webgui/embed.generated.ts
 src/provider/models-snapshot.ts
+src/provider/models-snapshot.js
+src/provider/models-snapshot.d.ts
+script/build-*.ts
+temporary-*.md
+.artifacts
