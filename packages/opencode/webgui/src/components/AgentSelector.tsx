@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
 import { sdk } from "../lib/api/sdkClient"
+import { eventEmitter } from "../lib/api/events"
 import type { Agent } from "@opencode-ai/sdk/client"
 import { useDropdown } from "../hooks/useDropdown"
 
@@ -47,9 +48,15 @@ export function AgentSelector({ selectedAgent, onSelect, disabled }: AgentSelect
       }
     }
 
-    loadAgents()
+    void loadAgents()
+    const unsubscribe = eventEmitter.on("server.connected", () => {
+      if (!active) return
+      void loadAgents()
+    })
+
     return () => {
       active = false
+      unsubscribe()
     }
   }, [])
 

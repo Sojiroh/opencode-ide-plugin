@@ -24,8 +24,17 @@ const isMac = typeof navigator !== "undefined" && navigator.platform.includes("M
 
 // Inner component that uses MessagesContext
 function AppInner({ connectionState }: { connectionState: ConnectionState }) {
-  const { currentSession, sessions, newVirtual, switchSession, isCreating, error, clearError, restoreSelections } =
-    useSession()
+  const {
+    currentSession,
+    sessions,
+    newVirtual,
+    switchSession,
+    isCreating,
+    error,
+    clearError,
+    restoreSelections,
+    loadSessions,
+  } = useSession()
   const { loadSessionMessages } = useMessages()
   const { showToast } = useToast()
   const compactHeaderRef = useRef<{ toggleSessionDropdown: () => void }>(null)
@@ -43,6 +52,7 @@ function AppInner({ connectionState }: { connectionState: ConnectionState }) {
 
   const [bridge, setBridge] = useState<UiBridgeState | null>(null)
   const restored = useRef({ session: false, selections: false })
+  const previousConnectionState = useRef<ConnectionState | null>(null)
 
   useEffect(() => uiBridgeSubscribe((s) => setBridge(s)), [])
 
@@ -206,6 +216,25 @@ function AppInner({ connectionState }: { connectionState: ConnectionState }) {
       }, 100)
     }
   }, [currentSession?.id, loadSessionMessages])
+
+  useEffect(() => {
+    const previousState = previousConnectionState.current
+    previousConnectionState.current = connectionState
+
+    if (connectionState !== "connected" || previousState === "connected") return
+
+    console.log("[App] Connection established, refreshing session state")
+    void loadSessions()
+
+    if (bridge?.sessionID && currentSession?.id !== bridge.sessionID) {
+      void switchSession(bridge.sessionID)
+      return
+    }
+
+    if (currentSession?.id) {
+      void loadSessionMessages(currentSession.id)
+    }
+  }, [bridge?.sessionID, connectionState, currentSession?.id, loadSessionMessages, loadSessions, switchSession])
 
   // Show toast for session context errors
   useEffect(() => {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react"
 import { sdk } from "../lib/api/sdkClient"
+import { eventEmitter } from "../lib/api/events"
 import type { Provider } from "@opencode-ai/sdk/client"
 import { useDropdown } from "../hooks/useDropdown"
 
@@ -44,41 +45,51 @@ export function ModelSelector({ selectedProviderId, selectedModelId, onSelect, d
     [favorite],
   )
 
+  const load = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const [provRes, modelRes] = await Promise.all([sdk.config.providers(), sdk.model.get()])
+
+      if (provRes.error) {
+        console.error("[ModelSelector] Failed to load providers:", provRes.error)
+        return
+      }
+
+      if (provRes.data) {
+        setProviders(provRes.data.providers)
+        setDefaultIds(provRes.data.default)
+      }
+
+      if (modelRes.data) {
+        setRecent(modelRes.data.recent.slice(0, MAX_RECENT))
+        setFavorite(modelRes.data.favorite)
+      }
+    } catch (err) {
+      console.error("[ModelSelector] Failed to load:", err)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     let active = true
 
-    async function load() {
-      setIsLoading(true)
-      try {
-        const [provRes, modelRes] = await Promise.all([sdk.config.providers(), sdk.model.get()])
-
-        if (!active) return
-
-        if (provRes.error) {
-          console.error("[ModelSelector] Failed to load providers:", provRes.error)
-          setIsLoading(false)
-          return
-        }
-
-        if (provRes.data) {
-          setProviders(provRes.data.providers)
-          setDefaultIds(provRes.data.default)
-        }
-
-        if (modelRes.data) {
-          setRecent(modelRes.data.recent.slice(0, MAX_RECENT))
-          setFavorite(modelRes.data.favorite)
-        }
-      } catch (err) {
-        if (active) console.error("[ModelSelector] Failed to load:", err)
-      } finally {
-        if (active) setIsLoading(false)
-      }
+    const run = async () => {
+      await load()
+      if (!active) return
     }
 
-    load()
-    return () => { active = false }
-  }, [])
+    void run()
+    const unsubscribe = eventEmitter.on("server.connected", () => {
+      if (!active) return
+      void load()
+    })
+
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [load])
 
   const getCurrentDisplay = () => {
     const pid = selectedProviderId || defaultIds.provider

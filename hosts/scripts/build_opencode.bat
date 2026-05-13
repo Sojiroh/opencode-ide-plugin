@@ -1,13 +1,15 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
-rem Build opencode for multiple platforms and place binaries in both JetBrains and VSCode plugin resources.
+rem Build opencode for multiple platforms and place binaries plus webgui-dist in both JetBrains and VSCode plugin resources.
 
 pushd "%~dp0\..\.."
 set "ROOT_DIR=%CD%"
 popd
 
 set "OPENCODE_DIR=%ROOT_DIR%\packages\opencode"
+set "WEBGUI_DIR=%OPENCODE_DIR%\webgui"
+set "WEBGUI_DIST=%OPENCODE_DIR%\webgui-dist"
 set "DIST_DIR=%OPENCODE_DIR%\dist"
 set "JETBRAINS_BIN_DIR=%ROOT_DIR%\hosts\jetbrains-plugin\src\main\resources\bin"
 set "VSCODE_BIN_DIR=%ROOT_DIR%\hosts\vscode-plugin\resources\bin"
@@ -28,6 +30,20 @@ call :prepare_output_dir "%VSCODE_BIN_DIR%"
 
 if not defined OPENCODE_VERSION (
   for /f "delims=" %%V in ('node -p "require('%OPENCODE_DIR:\=/%/package.json').version"') do set "OPENCODE_VERSION=%%V"
+)
+
+echo => Building webgui-dist
+pushd "%WEBGUI_DIR%"
+bun run build
+if errorlevel 1 (
+  popd
+  exit /b 1
+)
+popd
+
+if not exist "%WEBGUI_DIST%" (
+  echo Error: expected webgui-dist directory not found at %WEBGUI_DIST% 1>&2
+  exit /b 1
 )
 
 echo => Building opencode distribution (version %OPENCODE_VERSION%)
@@ -114,8 +130,12 @@ if not exist "%VSCODE_TARGET%" mkdir "%VSCODE_TARGET%"
 
 copy /Y "%BINARY_SRC%" "%JETBRAINS_TARGET%\%BINARY_NAME%" >nul
 copy /Y "%BINARY_SRC%" "%VSCODE_TARGET%\%BINARY_NAME%" >nul
+xcopy "%WEBGUI_DIST%" "%JETBRAINS_TARGET%\webgui-dist\" /E /I /Y >nul
+if errorlevel 1 exit /b 1
+xcopy "%WEBGUI_DIST%" "%VSCODE_TARGET%\webgui-dist\" /E /I /Y >nul
+if errorlevel 1 exit /b 1
 
-echo => Prepared binaries for %OS%/%ARCH%
+echo => Prepared binaries and webgui-dist for %OS%/%ARCH%
 set "FOUND_DIST=true"
 exit /b
 

@@ -168,90 +168,82 @@ export function SessionProvider({ children }: SessionProviderProps) {
     })
   }, [])
 
+  const loadServerState = useCallback(async () => {
+    try {
+      const [kvRes, modelRes] = await Promise.all([sdk.kv.get(), sdk.model.get()])
+      const kv = kvRes.data ?? {}
+      const modelPrefs = modelRes.data
+
+      if (kv.webgui_agent_model) {
+        setAgentModelMap(kv.webgui_agent_model)
+      }
+
+      if (modelPrefs?.variant) {
+        setVariantMap(modelPrefs.variant as Record<string, string>)
+      }
+
+      const agent = kv.webgui_agent || "build"
+      setSelectedAgentState(agent)
+      localStorage.setItem("opencode_selected_agent", agent)
+
+      let providerId = kv.webgui_provider as string | undefined
+      let modelId = kv.webgui_model as string | undefined
+
+      if (kv.webgui_agent_model?.[agent]) {
+        providerId = kv.webgui_agent_model[agent].provider_id
+        modelId = kv.webgui_agent_model[agent].model_id
+      }
+
+      if (!providerId || !modelId) {
+        const recent = modelPrefs?.recent ?? []
+        if (recent.length > 0) {
+          providerId = recent[0].providerID
+          modelId = recent[0].modelID
+        }
+      }
+
+      if (!providerId || !modelId) {
+        const configResponse = await sdk.config.get()
+
+        if (configResponse.data?.model) {
+          const parts = configResponse.data.model.split("/")
+          if (parts.length === 2) {
+            providerId = parts[0]
+            modelId = parts[1]
+          }
+        }
+      }
+
+      if (providerId && modelId) {
+        setSelectedProviderId(providerId)
+        setSelectedModelId(modelId)
+        localStorage.setItem("opencode_selected_provider", providerId)
+        localStorage.setItem("opencode_selected_model", modelId)
+
+        if (modelPrefs?.variant) {
+          const modelKey = `${providerId}/${modelId}`
+          setSelectedVariantState((modelPrefs.variant as Record<string, string>)[modelKey])
+        }
+      }
+    } catch (err) {
+      console.error("[SessionContext] Failed to load state from server, using localStorage fallback:", err)
+      const savedProvider = localStorage.getItem("opencode_selected_provider")
+      const savedModel = localStorage.getItem("opencode_selected_model")
+      const savedAgent = localStorage.getItem("opencode_selected_agent")
+
+      if (savedProvider) setSelectedProviderId(savedProvider)
+      if (savedModel) setSelectedModelId(savedModel)
+      if (savedAgent) setSelectedAgentState(savedAgent)
+    }
+  }, [])
+
   /**
    * Initialize state from server on mount
    * Priority: server state > config > localStorage
    */
   useEffect(() => {
-    const initializeState = async () => {
-      try {
-        // Fetch preferences from kv.json and model.json (shared with CLI)
-        const [kvRes, modelRes] = await Promise.all([sdk.kv.get(), sdk.model.get()])
-        const kv = kvRes.data ?? {}
-        const modelPrefs = modelRes.data
-
-        // Cache agent_model map from kv
-        if (kv.webgui_agent_model) {
-          setAgentModelMap(kv.webgui_agent_model)
-        }
-
-        // Load variant map from model.json
-        if (modelPrefs?.variant) {
-          setVariantMap(modelPrefs.variant as Record<string, string>)
-        }
-
-        // Set agent (default to 'build' if not set)
-        const agent = kv.webgui_agent || "build"
-        setSelectedAgentState(agent)
-        localStorage.setItem("opencode_selected_agent", agent)
-
-        // Check if there's a per-agent model preference
-        let providerId = kv.webgui_provider as string | undefined
-        let modelId = kv.webgui_model as string | undefined
-
-        if (kv.webgui_agent_model?.[agent]) {
-          providerId = kv.webgui_agent_model[agent].provider_id
-          modelId = kv.webgui_agent_model[agent].model_id
-        }
-
-        // If no kv state, try recent list from model.json, then config fallback
-        if (!providerId || !modelId) {
-          const recent = modelPrefs?.recent ?? []
-          if (recent.length > 0) {
-            providerId = recent[0].providerID
-            modelId = recent[0].modelID
-          }
-        }
-
-        if (!providerId || !modelId) {
-          const configResponse = await sdk.config.get()
-
-          if (configResponse.data?.model) {
-            const parts = configResponse.data.model.split("/")
-            if (parts.length === 2) {
-              providerId = parts[0]
-              modelId = parts[1]
-            }
-          }
-        }
-
-        // Set model/provider if we have them
-        if (providerId && modelId) {
-          setSelectedProviderId(providerId)
-          setSelectedModelId(modelId)
-          localStorage.setItem("opencode_selected_provider", providerId)
-          localStorage.setItem("opencode_selected_model", modelId)
-
-          // Compute initial variant for the selected model
-          if (modelPrefs?.variant) {
-            const modelKey = `${providerId}/${modelId}`
-            setSelectedVariantState((modelPrefs.variant as Record<string, string>)[modelKey])
-          }
-        }
-      } catch (err) {
-        console.error("[SessionContext] Failed to load state from server, using localStorage fallback:", err)
-        const savedProvider = localStorage.getItem("opencode_selected_provider")
-        const savedModel = localStorage.getItem("opencode_selected_model")
-        const savedAgent = localStorage.getItem("opencode_selected_agent")
-
-        if (savedProvider) setSelectedProviderId(savedProvider)
-        if (savedModel) setSelectedModelId(savedModel)
-        if (savedAgent) setSelectedAgentState(savedAgent)
-      }
-    }
-
-    initializeState()
-  }, [])
+    void loadServerState()
+  }, [loadServerState])
 
   /**
    * Set selected model and persist to server + localStorage
@@ -508,6 +500,15 @@ export function SessionProvider({ children }: SessionProviderProps) {
     }
   }, [])
 
+  useEffect(() => {
+    const unsubscribe = eventEmitter.on("server.connected", () => {
+      void loadServerState()
+      void loadSessions()
+    })
+
+    return unsubscribe
+  }, [loadServerState, loadSessions])
+
   /**
    * Create a new session
    */
@@ -601,18 +602,24 @@ export function SessionProvider({ children }: SessionProviderProps) {
     async (sessionId: string) => {
       console.log("[SessionContext] Switching to session:", sessionId)
 
-      const session = sessions.find((s) => s.id === sessionId)
-      if (session) {
-        setCurrentSession(session)
-        setIsVirtualSession(false)
-      } else {
+      try {
+        const session = sessions.find((s) => s.id === sessionId)
+        if (session) {
+          setCurrentSession(session)
+          setIsVirtualSession(false)
+          return
+        }
+
         console.warn("[SessionContext] Session not found in local list, fetching...")
-        // If not in local list, fetch it
         const response = await sdk.session.get({ path: { id: sessionId } })
         if (response.data) {
           setCurrentSession(response.data)
           setIsVirtualSession(false)
         }
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : "Failed to switch session"
+        console.error("[SessionContext] Failed to switch session:", errorMsg)
+        setError(new Error(errorMsg))
       }
     },
     [sessions],

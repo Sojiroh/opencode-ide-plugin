@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react"
 import { sdk, setServerDirectory } from "../lib/api/sdkClient"
+import { eventEmitter } from "../lib/api/events"
 
 interface ProjectInfo {
   id: string
@@ -39,40 +40,48 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
 
-  useEffect(() => {
-    const fetchProject = async () => {
-      try {
-        setIsLoading(true)
-        const response = await sdk.project.current()
-        if (response.error) {
-          throw new Error(
-            typeof response.error === "object" && response.error && "message" in response.error
-              ? String(response.error.message)
-              : "Failed to fetch project",
-          )
-        }
-
-        if (response.data) {
-          setProject(response.data as ProjectInfo)
-          setServerDirectory((response.data as ProjectInfo).worktree)
-          setError(null)
-        }
-
-        const pathResult = await sdk.path.get()
-        if (!pathResult.error && pathResult.data) {
-          setDirectory(pathResult.data.directory)
-          setServerDirectory(pathResult.data.directory)
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err : new Error("Failed to fetch project"))
-        console.error("Failed to fetch project:", err)
-      } finally {
-        setIsLoading(false)
+  const fetchProject = useCallback(async () => {
+    try {
+      setIsLoading(true)
+      const response = await sdk.project.current()
+      if (response.error) {
+        throw new Error(
+          typeof response.error === "object" && response.error && "message" in response.error
+            ? String(response.error.message)
+            : "Failed to fetch project",
+        )
       }
-    }
 
-    fetchProject()
+      if (response.data) {
+        setProject(response.data as ProjectInfo)
+        setServerDirectory((response.data as ProjectInfo).worktree)
+        setError(null)
+      }
+
+      const pathResult = await sdk.path.get()
+      if (!pathResult.error && pathResult.data) {
+        setDirectory(pathResult.data.directory)
+        setServerDirectory(pathResult.data.directory)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error("Failed to fetch project"))
+      console.error("Failed to fetch project:", err)
+    } finally {
+      setIsLoading(false)
+    }
   }, [])
+
+  useEffect(() => {
+    void fetchProject()
+  }, [fetchProject])
+
+  useEffect(() => {
+    const unsubscribe = eventEmitter.on("server.connected", () => {
+      void fetchProject()
+    })
+
+    return unsubscribe
+  }, [fetchProject])
 
   const value: ProjectContextState = {
     project,

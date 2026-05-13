@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build opencode for multiple platforms and place binaries in both JetBrains and VSCode plugin resources.
+# Build opencode for multiple platforms and place binaries plus webgui-dist in
+# both JetBrains and VSCode plugin resources.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OPENCODE_DIR="$ROOT_DIR/packages/opencode"
+WEBGUI_DIR="$OPENCODE_DIR/webgui"
+WEBGUI_DIST="$OPENCODE_DIR/webgui-dist"
 DIST_DIR="$OPENCODE_DIR/dist"
 JETBRAINS_BIN_DIR="$ROOT_DIR/hosts/jetbrains-plugin/src/main/resources/bin"
 VSCODE_BIN_DIR="$ROOT_DIR/hosts/vscode-plugin/resources/bin"
@@ -35,6 +38,17 @@ prepare_output_dir() {
 
 OPENCODE_VERSION="${OPENCODE_VERSION:-$(node -p "require('$OPENCODE_DIR/package.json').version")}"
 export OPENCODE_VERSION
+
+echo "=> Building webgui-dist"
+(
+  cd "$WEBGUI_DIR"
+  bun run build
+)
+
+if [[ ! -d "$WEBGUI_DIST" ]]; then
+  echo "Error: expected webgui-dist directory not found at $WEBGUI_DIST" >&2
+  exit 1
+fi
 
 echo "=> Building opencode distribution (version $OPENCODE_VERSION)"
 (
@@ -108,19 +122,21 @@ for dir in "${dist_entries[@]}"; do
 
   cp "$binary_src" "$jetbrains_target/$binary_name"
   cp "$binary_src" "$vscode_target/$binary_name"
+  cp -R "$WEBGUI_DIST" "$jetbrains_target/webgui-dist"
+  cp -R "$WEBGUI_DIST" "$vscode_target/webgui-dist"
 
   if [[ "$os" != "windows" ]]; then
     chmod +x "$jetbrains_target/$binary_name"
     chmod +x "$vscode_target/$binary_name"
   fi
 
-  echo "=> Prepared binaries for $os/$arch"
+  echo "=> Prepared binaries and webgui-dist for $os/$arch"
 done
 
 shopt -u nullglob
 
 echo
-echo "All done. Binaries placed under:"
+echo "All done. Binaries and webgui-dist placed under:"
 echo "  JetBrains: $JETBRAINS_BIN_DIR"
 echo "  VSCode: $VSCODE_BIN_DIR"
 echo "opencode dists remain in $DIST_DIR"

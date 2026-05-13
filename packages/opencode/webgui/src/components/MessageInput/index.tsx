@@ -6,6 +6,7 @@ import { $createMentionNode } from "../mention/MentionNode"
 import { useSession } from "../../state/SessionContext"
 import { useProject } from "../../state/ProjectContext"
 import { useProviders } from "../../state/ProvidersContext"
+import { eventEmitter } from "../../lib/api/events"
 import { sdk } from "../../lib/api/sdkClient"
 import type { Provider } from "@opencode-ai/sdk/client"
 import { toProjectRelative } from "../../utils/path"
@@ -256,6 +257,7 @@ const MessageInputInner = forwardRef<
   // Load providers for variant computation
   useEffect(() => {
     let active = true
+
     async function loadProviders() {
       try {
         const response = await sdk.config.providers()
@@ -267,9 +269,16 @@ const MessageInputInner = forwardRef<
         console.error("[MessageInput] Failed to load providers:", err)
       }
     }
-    loadProviders()
+
+    void loadProviders()
+    const unsubscribe = eventEmitter.on("server.connected", () => {
+      if (!active) return
+      void loadProviders()
+    })
+
     return () => {
       active = false
+      unsubscribe()
     }
   }, [])
 

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useRef, type ReactNode } from "react"
+import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from "react"
 import { eventEmitter, useEventHandler, type EventEmitter, type ServerEvent } from "../lib/api/events"
 import type { Message, Part, WebguiPart, SDKMessage, QuestionRequest } from "../types/messages"
 import type { QuestionAnswer } from "@opencode-ai/sdk/v2/client"
@@ -616,6 +616,16 @@ export function MessagesProvider({ children }: MessagesProviderProps) {
   useEventHandler(sourceEmitter, "question.asked", handleQuestionAsked)
   useEventHandler(sourceEmitter, "question.replied", handleQuestionReplied)
   useEventHandler(sourceEmitter, "question.rejected", handleQuestionRejected)
+
+  useEffect(() => {
+    const unsubscribe = eventEmitter.on("server.connected", () => {
+      const sessionID = session.currentSession?.id
+      if (!sessionID) return
+      void loadSessionMessages(sessionID)
+    })
+
+    return unsubscribe
+  }, [loadSessionMessages, session.currentSession?.id])
 
   const value: MessagesContextValue = {
     messages,
