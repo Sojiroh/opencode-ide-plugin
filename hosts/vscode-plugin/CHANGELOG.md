@@ -5,6 +5,12 @@ All notable changes to the OpenCode VSCode extension will be documented in this 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec2.0.0.html).
 
+### [26.5.13] - 2026-05-13
+
+- Fix reconnect issue after token refresh
+- Fix connection initialization race condition
+- Updated OpenCode to v1.14.48
+
 ### [26.2.27] - 2026-02-27
 
 - Add theme persistence
