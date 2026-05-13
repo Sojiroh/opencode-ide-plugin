@@ -5,9 +5,10 @@ import { serverBase } from "./sdkClient"
 // Event type definitions based on server Bus events
 export type ServerEvent =
   | { type: "server.connected"; properties: {} }
-  | { type: "session.created"; properties: { sessionID: string; session: any } }
-  | { type: "session.updated"; properties: { sessionID: string; session: any } }
-  | { type: "session.deleted"; properties: { sessionID: string } }
+  | { type: "server.heartbeat"; properties: {} }
+  | { type: "session.created"; properties: { sessionID: string; info: any } }
+  | { type: "session.updated"; properties: { sessionID: string; info: any } }
+  | { type: "session.deleted"; properties: { sessionID: string; info: any } }
   | { type: "session.error"; properties: { sessionID: string; error: any } }
   | {
       type: "session.status"
@@ -26,6 +27,10 @@ export type ServerEvent =
   | { type: "session.diff"; properties: { sessionID: string; diff: FileDiff[] } }
   | { type: "message.updated"; properties: { info: any } }
   | { type: "message.removed"; properties: { sessionID: string; messageID: string } }
+  | {
+      type: "message.part.delta"
+      properties: { sessionID: string; messageID: string; partID: string; field: string; delta: string }
+    }
   | { type: "message.part.updated"; properties: { part: any; delta?: string } }
   | { type: "message.part.removed"; properties: { sessionID: string; messageID: string; partID: string } }
   | { type: "permission.asked"; properties: any }
@@ -127,18 +132,30 @@ export class EventEmitter {
   }
 }
 
-// Configuration for exponential backoff reconnection
-const RECONNECT_CONFIG = {
-  initialDelay: 1000, // Start with 1 second
-  maxDelay: 30000, // Max 30 seconds
-  multiplier: 2, // Double the delay each time
-  maxAttempts: Infinity, // Keep trying forever
-}
-
 export interface EventStreamOptions {
   url?: string
+  directory?: string
   onConnectionStateChange?: (state: ConnectionState) => void
   debug?: boolean
+}
+
+type GlobalServerEvent = {
+  directory?: string
+  payload: ServerEvent
+}
+
+function isServerEvent(value: unknown): value is ServerEvent {
+  return !!value && typeof value === "object" && "type" in value && typeof (value as { type?: unknown }).type === "string"
+}
+
+function resolveServerEvent(value: unknown, directory?: string): ServerEvent | null {
+  if (isServerEvent(value)) return value
+  if (!value || typeof value !== "object" || !("payload" in value)) return null
+
+  const event = value as GlobalServerEvent
+  if (!isServerEvent(event.payload)) return null
+  if (directory && typeof event.directory === "string" && event.directory !== directory) return null
+  return event.payload
 }
 
 /**
@@ -148,14 +165,11 @@ export interface EventStreamOptions {
  * @returns Object with connection state, event emitter, and control functions
  */
 export function useEventStream(options: EventStreamOptions = {}) {
-  const { url = `${serverBase}/event`, onConnectionStateChange, debug = false } = options
+  const { url = `${serverBase}/event`, directory, onConnectionStateChange, debug = false } = options
 
   const [connectionState, setConnectionState] = useState<ConnectionState>("connecting")
   const emitterRef = useRef<EventEmitter>(new EventEmitter({ debug }))
   const eventSourceRef = useRef<EventSource | null>(null)
-  const reconnectTimeoutRef = useRef<number | null>(null)
-  const reconnectAttemptsRef = useRef(0)
-  const reconnectDelayRef = useRef(RECONNECT_CONFIG.initialDelay)
   const mountedRef = useRef(true)
   const onConnectionStateChangeRef = useRef(onConnectionStateChange)
 
@@ -175,12 +189,6 @@ export function useEventStream(options: EventStreamOptions = {}) {
       eventSourceRef.current = null
     }
 
-    // Clear any pending reconnect
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current)
-      reconnectTimeoutRef.current = null
-    }
-
     if (!mountedRef.current) return
 
     if (debug) {
@@ -197,15 +205,12 @@ export function useEventStream(options: EventStreamOptions = {}) {
           console.log("[SSE] Connection established")
         }
         updateConnectionState("connected")
-        // Reset reconnect delay on successful connection
-        reconnectAttemptsRef.current = 0
-        reconnectDelayRef.current = RECONNECT_CONFIG.initialDelay
       }
 
       eventSource.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data) as ServerEvent
-          emitterRef.current.emit(data)
+          const data = resolveServerEvent(JSON.parse(event.data), directory)
+          if (data) emitterRef.current.emit(data)
         } catch (error) {
           if (debug) {
             console.error("[SSE] Failed to parse event data:", error)
@@ -215,36 +220,18 @@ export function useEventStream(options: EventStreamOptions = {}) {
 
       eventSource.onerror = (error) => {
         if (debug) {
-          console.error("[SSE] Connection error:", error)
+          console.error("[SSE] Connection error (browser will auto-reconnect)", error)
         }
-        eventSource.close()
-        eventSourceRef.current = null
 
-        if (!mountedRef.current) return
-
-        updateConnectionState("error")
-
-        // Implement exponential backoff for reconnection
-        reconnectAttemptsRef.current++
-
-        if (reconnectAttemptsRef.current <= RECONNECT_CONFIG.maxAttempts) {
-          const delay = Math.min(reconnectDelayRef.current, RECONNECT_CONFIG.maxDelay)
-          if (debug) {
-            console.log(`[SSE] Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current})`)
+        if (!mountedRef.current) {
+          eventSource.close()
+          if (eventSourceRef.current === eventSource) {
+            eventSourceRef.current = null
           }
-
-          reconnectTimeoutRef.current = window.setTimeout(() => {
-            if (mountedRef.current) {
-              connect()
-            }
-          }, delay)
-
-          // Increase delay for next attempt
-          reconnectDelayRef.current = Math.min(
-            reconnectDelayRef.current * RECONNECT_CONFIG.multiplier,
-            RECONNECT_CONFIG.maxDelay,
-          )
+          return
         }
+
+        updateConnectionState("connecting")
       }
     } catch (error) {
       if (debug) {
@@ -252,16 +239,11 @@ export function useEventStream(options: EventStreamOptions = {}) {
       }
       updateConnectionState("error")
     }
-  }, [url, updateConnectionState, debug])
+  }, [directory, url, updateConnectionState, debug])
 
   const disconnect = useCallback(() => {
     if (debug) {
       console.log("[SSE] Disconnecting...")
-    }
-
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current)
-      reconnectTimeoutRef.current = null
     }
 
     if (eventSourceRef.current) {

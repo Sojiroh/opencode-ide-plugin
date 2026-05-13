@@ -151,12 +151,21 @@ export function ModelSelector({ selectedProviderId, selectedModelId, onSelect, d
     const provider = providers.find((p) => p.id === providerID)
     const model = provider?.models[modelID]
     const name = model?.name || modelID
+    const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (event.target !== event.currentTarget) return
+      if (event.key !== "Enter" && event.key !== " ") return
+      event.preventDefault()
+      void handleSelect(providerID, modelID)
+    }
 
     return (
-      <button
+      <div
         key={`${providerID}:${modelID}`}
         onClick={() => handleSelect(providerID, modelID)}
-        className={`w-full px-3 py-2 text-xs text-left hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-between ${
+        onKeyDown={handleKeyDown}
+        role="button"
+        tabIndex={0}
+        className={`w-full px-3 py-2 text-xs text-left hover:bg-gray-100 dark:hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 flex items-center justify-between cursor-pointer ${
           isSelected
             ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400"
             : "text-gray-900 dark:text-gray-100"
@@ -181,7 +190,7 @@ export function ModelSelector({ selectedProviderId, selectedModelId, onSelect, d
             </svg>
           )}
         </div>
-      </button>
+      </div>
     )
   }
 

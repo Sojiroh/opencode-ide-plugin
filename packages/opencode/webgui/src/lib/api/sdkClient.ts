@@ -13,7 +13,34 @@ import { ideBridge } from "../ideBridge"
 export const serverBase: string =
   ((globalThis as any).__OPENCODE_SERVER_URL__ as string | undefined)?.replace(/\/$/, "") || ""
 
-const baseClient = createOpencodeClient({ baseUrl: serverBase || "/" })
+let serverDirectory: string | undefined
+
+function requestHeaders(headers?: HeadersInit) {
+  const next = new Headers(headers)
+  if (serverDirectory && !next.has("x-opencode-directory")) {
+    next.set("x-opencode-directory", serverDirectory)
+  }
+  return next
+}
+
+function serverFetch(path: string, init?: RequestInit) {
+  return fetch(`${serverBase}${path}`, {
+    ...init,
+    headers: requestHeaders(init?.headers),
+  })
+}
+
+const baseClient = createOpencodeClient({
+  baseUrl: serverBase || "/",
+  fetch: (request: Request) => {
+    ;(request as any).timeout = false
+    return fetch(new Request(request, { headers: requestHeaders(request.headers) }))
+  },
+})
+
+export function setServerDirectory(directory: string | null | undefined) {
+  serverDirectory = directory || undefined
+}
 
 interface ModelEntry {
   providerID: string
@@ -42,7 +69,7 @@ export const sdk = {
   session: Object.assign(baseClient.session, {
     retry: async (options: { path: { sessionID: string } }) => {
       try {
-        const response = await fetch(`${serverBase}/app/api/session/${options.path.sessionID}/retry`, {
+        const response = await serverFetch(`/app/api/session/${options.path.sessionID}/retry`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
         })
@@ -71,7 +98,7 @@ export const sdk = {
   path: {
     get: async () => {
       try {
-        const response = await fetch(`${serverBase}/path`, {
+        const response = await serverFetch("/path", {
           method: "GET",
           headers: { "Content-Type": "application/json" },
         })
@@ -95,7 +122,7 @@ export const sdk = {
   },
   auth: {
     set: async (provider: string, value: any) => {
-      const res = await fetch(`${serverBase}/app/api/auth/set`, {
+      const res = await serverFetch("/app/api/auth/set", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider, value }),
@@ -103,18 +130,18 @@ export const sdk = {
       if (!res.ok) throw new Error(await res.text())
     },
     list: async () => {
-      const res = await fetch(`${serverBase}/app/api/auth/list`)
+      const res = await serverFetch("/app/api/auth/list")
       return res.json() as Promise<Record<string, any>>
     },
     remove: async (provider: string) => {
-      await fetch(`${serverBase}/app/api/auth/remove`, {
+      await serverFetch("/app/api/auth/remove", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider }),
       })
     },
     methods: async (provider: string) => {
-      const res = await fetch(`${serverBase}/app/api/auth/methods?provider=${provider}`)
+      const res = await serverFetch(`/app/api/auth/methods?provider=${provider}`)
       return res.json() as Promise<
         Array<{
           label: string
@@ -124,7 +151,7 @@ export const sdk = {
       >
     },
     start: async (provider: string, methodIndex: number, inputs: any) => {
-      const res = await fetch(`${serverBase}/app/api/auth/login/start`, {
+      const res = await serverFetch("/app/api/auth/login/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider, methodIndex, inputs }),
@@ -133,7 +160,7 @@ export const sdk = {
       return res.json() as Promise<{ id: string; url?: string; method: "auto" | "code"; instructions?: string }>
     },
     submit: async (id: string, code: string) => {
-      const res = await fetch(`${serverBase}/app/api/auth/login/submit`, {
+      const res = await serverFetch("/app/api/auth/login/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, code }),
@@ -142,7 +169,7 @@ export const sdk = {
       return res.json() as Promise<boolean>
     },
     status: async (id: string) => {
-      const res = await fetch(`${serverBase}/app/api/auth/login/status/${id}`)
+      const res = await serverFetch(`/app/api/auth/login/status/${id}`)
       return res.json() as Promise<{ status: "pending" | "success" | "failed"; result?: any }>
     },
   },
@@ -151,7 +178,7 @@ export const sdk = {
       path: { requestID: string }
       body: { reply: "once" | "always" | "reject"; message?: string }
     }) => {
-      const response = await fetch(`${serverBase}/permission/${options.path.requestID}/reply`, {
+      const response = await serverFetch(`/permission/${options.path.requestID}/reply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(options.body),
@@ -165,7 +192,7 @@ export const sdk = {
   },
   question: {
     reply: async (options: { requestID: string; answers: Array<Array<string>> }) => {
-      const response = await fetch(`${serverBase}/question/${options.requestID}/reply`, {
+      const response = await serverFetch(`/question/${options.requestID}/reply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ answers: options.answers }),
@@ -177,7 +204,7 @@ export const sdk = {
       return { data, error: null }
     },
     reject: async (options: { requestID: string }) => {
-      const response = await fetch(`${serverBase}/question/${options.requestID}/reject`, {
+      const response = await serverFetch(`/question/${options.requestID}/reject`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       })

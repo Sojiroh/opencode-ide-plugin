@@ -3,11 +3,17 @@ import type { Session } from "@opencode-ai/sdk/client"
 
 interface UseSessionActionsProps {
   sessions: Session[]
+  currentSessionId?: string | null
   updateSessionTitle: (sessionId: string, title: string) => Promise<boolean>
   deleteSession: (sessionId: string) => Promise<boolean>
 }
 
-export function useSessionActions({ sessions, updateSessionTitle, deleteSession }: UseSessionActionsProps) {
+export function useSessionActions({
+  sessions,
+  currentSessionId,
+  updateSessionTitle,
+  deleteSession,
+}: UseSessionActionsProps) {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState("")
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
@@ -63,8 +69,13 @@ export function useSessionActions({ sessions, updateSessionTitle, deleteSession 
     let success = true
 
     if (deleteTarget === "bulk") {
+      const orderedSessionIds = Array.from(selectedSessions).filter((sessionId) => sessionId !== currentSessionId)
+      if (currentSessionId && selectedSessions.has(currentSessionId)) {
+        orderedSessionIds.push(currentSessionId)
+      }
+
       // Handle bulk delete
-      for (const sessionId of selectedSessions) {
+      for (const sessionId of orderedSessionIds) {
         const result = await deleteSession(sessionId)
         if (!result) {
           success = false

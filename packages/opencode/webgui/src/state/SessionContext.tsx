@@ -538,10 +538,12 @@ export function SessionProvider({ children }: SessionProviderProps) {
 
       if (response.data) {
         console.log("[SessionContext] Session created:", response.data.id)
+        setSessions((prev) => {
+          if (prev.some((s) => s.id === response.data!.id)) return prev
+          return [response.data!, ...prev]
+        })
         setCurrentSession(response.data)
         setIsVirtualSession(false)
-        // Don't add to sessions list here - let the session.created event handler do it
-        // This prevents duplicate sessions in the list
         setIsCreating(false)
         return response.data
       }
@@ -735,9 +737,10 @@ export function SessionProvider({ children }: SessionProviderProps) {
 
       if (response.data) {
         console.log("[SessionContext] Session forked:", response.data.id)
-        // Don't add to sessions list here - let the session.created event handler do it
-        // This prevents duplicate sessions in the list
-        // Switch to forked session
+        setSessions((prev) => {
+          if (prev.some((s) => s.id === response.data!.id)) return prev
+          return [response.data!, ...prev]
+        })
         setCurrentSession(response.data)
         setIsVirtualSession(false)
         return response.data

@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
-import { sdk } from "../lib/api/sdkClient"
+import { sdk, setServerDirectory } from "../lib/api/sdkClient"
 
 interface ProjectInfo {
   id: string
@@ -54,12 +54,14 @@ export function ProjectProvider({ children }: ProjectProviderProps) {
 
         if (response.data) {
           setProject(response.data as ProjectInfo)
+          setServerDirectory((response.data as ProjectInfo).worktree)
           setError(null)
         }
 
         const pathResult = await sdk.path.get()
         if (!pathResult.error && pathResult.data) {
           setDirectory(pathResult.data.directory)
+          setServerDirectory(pathResult.data.directory)
         }
       } catch (err) {
         setError(err instanceof Error ? err : new Error("Failed to fetch project"))

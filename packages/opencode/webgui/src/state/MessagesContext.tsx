@@ -1,5 +1,5 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react"
-import { useEventHandler, type EventEmitter, type ServerEvent } from "../lib/api/events"
+import { createContext, useContext, useState, useCallback, useRef, type ReactNode } from "react"
+import { eventEmitter, useEventHandler, type EventEmitter, type ServerEvent } from "../lib/api/events"
 import type { Message, Part, WebguiPart, SDKMessage, QuestionRequest } from "../types/messages"
 import type { QuestionAnswer } from "@opencode-ai/sdk/v2/client"
 // PermissionRequest type based on new permission system (permission.asked event)
@@ -96,12 +96,15 @@ function infoSessionErrorKey(info: unknown): string | undefined {
   return sessionErrorKey(error)
 }
 
-export function MessagesProvider({ children, emitter }: MessagesProviderProps) {
+export function MessagesProvider({ children }: MessagesProviderProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [permissions, setPermissions] = useState<PermissionRequest[]>([])
   const [questions, setQuestions] = useState<Map<string, QuestionRequest[]>>(new Map())
+  const pendingPartTextDeltasRef = useRef<Map<string, string>>(new Map())
+  const knownPartsRef = useRef<Map<string, Part>>(new Map())
   const session = useSession()
   const setReasoning = session.setReasoning
+  const sourceEmitter = eventEmitter
 
   // Add or update a message
   const addMessage = useCallback((message: Message) => {
@@ -214,19 +217,20 @@ export function MessagesProvider({ children, emitter }: MessagesProviderProps) {
   // Listen to message.updated events (also handles message creation)
   const handleMessageUpdated = useCallback((event: ServerEvent) => {
     if (event.type === "message.updated") {
-      const { info } = event.properties as { info: SDKMessage }
-      console.log("[MessagesContext] Message updated:", info.id, info.role)
+      const { info, sessionID } = event.properties as { info: SDKMessage; sessionID?: string }
+      const nextInfo = info.sessionID ? info : ({ ...info, sessionID } as SDKMessage)
+      console.log("[MessagesContext] Message updated:", nextInfo.id, nextInfo.role)
 
-      const key = infoSessionErrorKey(info)
+      const key = infoSessionErrorKey(nextInfo)
 
       // updateMessageInfo creates the message if it doesn't exist
       setMessages((prev) => {
-        const next = Store.updateMessageInfo(prev, info.id, info)
+        const next = Store.updateMessageInfo(prev, nextInfo.id, nextInfo)
         if (!key) return next
 
         // If we later receive a message-level error, remove any synthetic session error we created for it.
         return next.filter((m) => {
-          if (m.info.sessionID !== info.sessionID) return true
+          if (m.info.sessionID !== nextInfo.sessionID) return true
           if (!m.info.id.startsWith("error-")) return true
           return (m.info as any)?.syntheticErrorKey !== key
         })
@@ -238,25 +242,38 @@ export function MessagesProvider({ children, emitter }: MessagesProviderProps) {
   const handlePartUpdated = useCallback(
     (event: ServerEvent) => {
       if (event.type === "message.part.updated") {
-        const { part, delta } = event.properties as { part: Part; delta?: string }
+        const { part, delta, sessionID } = event.properties as { part: Part; delta?: string; sessionID?: string }
+        const nextEventPart = part.sessionID ? part : ({ ...part, sessionID } as Part)
+        const pendingDelta = pendingPartTextDeltasRef.current.get(nextEventPart.id)
+        const nextPart =
+          pendingDelta && "text" in nextEventPart && typeof nextEventPart.text === "string"
+            ? ({ ...nextEventPart, text: nextEventPart.text + pendingDelta } as Part)
+            : nextEventPart
+
+        if (pendingDelta) {
+          pendingPartTextDeltasRef.current.delete(nextEventPart.id)
+        }
+
+        knownPartsRef.current.set(nextPart.id, nextPart)
+
         console.log(
           "[MessagesContext] Part updated:",
-          part.id,
-          part.type,
+          nextPart.id,
+          nextPart.type,
           delta ? `(delta: ${delta.length} chars)` : "",
         )
 
-        if (delta && part.type === "text") {
+        if (delta && nextPart.type === "text") {
           // Apply delta for streaming text
-          setMessages((prev) => Store.applyPartDelta(prev, part.messageID, part, delta))
+          setMessages((prev) => Store.applyPartDelta(prev, nextPart.messageID, nextPart, delta))
         } else {
           // No delta, just upsert the part normally
-          addPart(part.messageID, part)
+          addPart(nextPart.messageID, nextPart)
         }
 
         // Reload file in IDE when write/edit/apply_patch tool completes
-        if (part.type === "tool") {
-          const toolPart = part as { tool?: string; state?: { status?: string; input?: { filePath?: string } } }
+        if (nextPart.type === "tool") {
+          const toolPart = nextPart as { tool?: string; state?: { status?: string; input?: { filePath?: string } } }
           if (
             (toolPart.tool === "write" || toolPart.tool === "edit") &&
             toolPart.state?.status === "completed" &&
@@ -280,17 +297,53 @@ export function MessagesProvider({ children, emitter }: MessagesProviderProps) {
           }
         }
 
-        if (part.type === "reasoning") {
+        if (nextPart.type === "reasoning") {
           //const time = (part as { time?: { end?: number } }).time
           //const end = typeof time?.end === 'number'
-          setReasoning(part.sessionID, true)
+          setReasoning(nextPart.sessionID, true)
         } else {
-          setReasoning(part.sessionID, false)
+          setReasoning(nextPart.sessionID, false)
         }
       }
     },
     [addPart, setReasoning],
   )
+
+  const handlePartDelta = useCallback((event: ServerEvent) => {
+    if (event.type !== "message.part.delta") return
+
+    const { messageID, partID, field, delta } = event.properties as {
+      sessionID: string
+      messageID: string
+      partID: string
+      field: string
+      delta: string
+    }
+
+    if (field !== "text" || typeof delta !== "string" || delta.length === 0) return
+
+    const knownPart = knownPartsRef.current.get(partID)
+    if (knownPart && knownPart.messageID === messageID) {
+      setMessages((prev) => Store.applyPartDelta(prev, messageID, knownPart, delta))
+      return
+    }
+
+    const hasExistingPart = messages.some(
+      (message) =>
+        message.info.id === messageID &&
+        message.parts.some((part) => part.id === partID && "text" in part && typeof part.text === "string"),
+    )
+
+    if (hasExistingPart) {
+      setMessages((prev) => Store.appendPartTextDelta(prev, messageID, partID, delta))
+      return
+    }
+
+    {
+      const existing = pendingPartTextDeltasRef.current.get(partID) ?? ""
+      pendingPartTextDeltasRef.current.set(partID, existing + delta)
+    }
+  }, [messages])
 
   // Listen to session.error events
   const handleSessionError = useCallback(
@@ -328,6 +381,8 @@ export function MessagesProvider({ children, emitter }: MessagesProviderProps) {
         }
         console.log("[MessagesContext] Part removed:", partID)
         removePart(messageID, partID)
+        knownPartsRef.current.delete(partID)
+        pendingPartTextDeltasRef.current.delete(partID)
         setReasoning(sessionID, false)
       }
     },
@@ -360,11 +415,11 @@ export function MessagesProvider({ children, emitter }: MessagesProviderProps) {
 
         console.log("[MessagesContext] Loaded messages sample:", loadedMessages[0])
 
-        // Replace messages for this session only if we received any; otherwise keep existing local state
+        // Merge the snapshot into local state so an in-flight load does not wipe
+        // newer live SSE parts that arrived before the request resolved.
         setMessages((prev) => {
           if (!loadedMessages || loadedMessages.length === 0) return prev
-          const filtered = prev.filter((msg) => msg.info.sessionID !== sessionID)
-          return [...filtered, ...loadedMessages]
+          return Store.mergeSessionMessages(prev, sessionID, loadedMessages)
         })
 
         try {
@@ -548,17 +603,19 @@ export function MessagesProvider({ children, emitter }: MessagesProviderProps) {
     }
   }, [])
 
-  // Subscribe to events if emitter is provided
-  useEventHandler(emitter ?? null, "message.updated", handleMessageUpdated)
-  useEventHandler(emitter ?? null, "message.part.updated", handlePartUpdated)
-  useEventHandler(emitter ?? null, "session.error", handleSessionError)
-  useEventHandler(emitter ?? null, "message.removed", handleMessageRemoved)
-  useEventHandler(emitter ?? null, "message.part.removed", handlePartRemoved)
-  useEventHandler(emitter ?? null, "permission.asked", handlePermissionAsked)
-  useEventHandler(emitter ?? null, "permission.replied", handlePermissionReplied)
-  useEventHandler(emitter ?? null, "question.asked", handleQuestionAsked)
-  useEventHandler(emitter ?? null, "question.replied", handleQuestionReplied)
-  useEventHandler(emitter ?? null, "question.rejected", handleQuestionRejected)
+  // Consume the same forwarded global event stream as SessionContext so the
+  // message state stays aligned with the rest of the WebGUI live updates.
+  useEventHandler(sourceEmitter, "message.updated", handleMessageUpdated)
+  useEventHandler(sourceEmitter, "message.part.delta", handlePartDelta)
+  useEventHandler(sourceEmitter, "message.part.updated", handlePartUpdated)
+  useEventHandler(sourceEmitter, "session.error", handleSessionError)
+  useEventHandler(sourceEmitter, "message.removed", handleMessageRemoved)
+  useEventHandler(sourceEmitter, "message.part.removed", handlePartRemoved)
+  useEventHandler(sourceEmitter, "permission.asked", handlePermissionAsked)
+  useEventHandler(sourceEmitter, "permission.replied", handlePermissionReplied)
+  useEventHandler(sourceEmitter, "question.asked", handleQuestionAsked)
+  useEventHandler(sourceEmitter, "question.replied", handleQuestionReplied)
+  useEventHandler(sourceEmitter, "question.rejected", handleQuestionRejected)
 
   const value: MessagesContextValue = {
     messages,

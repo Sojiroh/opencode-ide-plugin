@@ -1,4 +1,5 @@
 import type { Part } from "../../state/MessagesContext"
+import { MarkdownRenderer } from "../MarkdownRenderer"
 import { CollapsiblePart } from "./CollapsiblePart"
 
 interface ReasoningPartProps {
@@ -13,7 +14,7 @@ export function ReasoningPart({ part, durationMs }: ReasoningPartProps) {
     <CollapsiblePart
       trigger={<span className="leading-none">{label}</span>}
       triggerClassName="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
-      content={part.text || ""}
+      content={<MarkdownRenderer>{part.text || ""}</MarkdownRenderer>}
       contentClassName="mt-1 text-xs text-gray-600 dark:text-gray-400 pl-3 border-l-2 border-purple-300 dark:border-purple-700"
     />
   )

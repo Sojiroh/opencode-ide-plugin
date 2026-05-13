@@ -114,6 +114,7 @@ const CompactHeader = forwardRef<
   // Session actions (edit, delete)
   const actions = useSessionActions({
     sessions,
+    currentSessionId: currentSession?.id,
     updateSessionTitle,
     deleteSession,
   })
