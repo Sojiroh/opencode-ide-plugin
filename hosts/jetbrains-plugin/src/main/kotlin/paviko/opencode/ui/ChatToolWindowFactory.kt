@@ -213,6 +213,12 @@ class ChatToolWindowFactory : ToolWindowFactory, DumbAware {
                                                 logger.warn("Failed to set up drag and drop", e)
                                             }
 
+                                            try {
+                                                ClipboardBridge.install(browser)
+                                            } catch (e: Exception) {
+                                                logger.warn("Failed to install clipboard bridge", e)
+                                            }
+
                                             mainPanel.removeAll()
                                             mainPanel.add(browser.component, BorderLayout.CENTER)
                                             mainPanel.add(hideableLogs, BorderLayout.SOUTH)

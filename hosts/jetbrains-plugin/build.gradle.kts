@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "paviko.opencode"
-version = "26.5.13"
+version = "26.5.14"
 
 val guiOnly = project.findProperty("guiOnly")?.toString()?.toBoolean() ?: false
 val webguiDist = project.findProperty("webguiDist")?.toString()
